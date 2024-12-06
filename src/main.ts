@@ -5,6 +5,7 @@ import {
 } from '@nestjs/platform-fastify';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from 'src/app.module';
+import { StarWarsModule } from 'src/starwars/starwars.module';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestFastifyApplication>(
@@ -21,7 +22,7 @@ async function bootstrap() {
     .build();
 
   const documentFactory = () =>
-    SwaggerModule.createDocument(app, config, { include: [] });
+    SwaggerModule.createDocument(app, config, { include: [StarWarsModule] });
 
   SwaggerModule.setup('api', app, documentFactory);
 

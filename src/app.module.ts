@@ -5,6 +5,7 @@ import { APP_PIPE } from '@nestjs/core';
 import { GraphQLModule } from '@nestjs/graphql';
 import { ScheduleModule } from '@nestjs/schedule';
 import { DatabaseModule } from 'src/database/database.module';
+import { StarWarsModule } from './starwars/starwars.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { DatabaseModule } from 'src/database/database.module';
       autoSchemaFile: true,
       playground: true,
     }),
+    StarWarsModule,
     ScheduleModule.forRoot(),
   ],
   providers: [
