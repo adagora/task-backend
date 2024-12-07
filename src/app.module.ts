@@ -1,11 +1,14 @@
 import { ApolloDriver, ApolloDriverConfig } from '@nestjs/apollo';
-import { Module, ValidationPipe } from '@nestjs/common';
+import { Inject, Module, ValidationPipe } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_PIPE } from '@nestjs/core';
 import { GraphQLModule } from '@nestjs/graphql';
 import { ScheduleModule } from '@nestjs/schedule';
 import { DatabaseModule } from 'src/database/database.module';
 import { StarWarsModule } from './starwars/starwars.module';
+import { CACHE_MANAGER, CacheModule } from '@nestjs/cache-manager';
+
+import { RedisCache, redisStore } from 'cache-manager-redis-yet';
 
 @Module({
   imports: [
@@ -20,6 +23,21 @@ import { StarWarsModule } from './starwars/starwars.module';
     }),
     StarWarsModule,
     ScheduleModule.forRoot(),
+    CacheModule.registerAsync({
+      useFactory: async () => {
+        return {
+          store: redisStore,
+          database: process.env.REDIS_DEFAULT_DB,
+          socket: {
+            host: process.env.REDIS_HOST,
+            port: parseInt(process.env.REDIS_PORT!),
+            password: process.env.REDIS_PASSWORD,
+            ttl: parseInt(process.env.CACHE_DEFAULT_TTL!),
+          },
+        };
+      },
+      isGlobal: true,
+    }),
   ],
   providers: [
     {
@@ -28,4 +46,10 @@ import { StarWarsModule } from './starwars/starwars.module';
     },
   ],
 })
-export class AppModule {}
+export class AppModule {
+  constructor(@Inject(CACHE_MANAGER) private cacheManager: RedisCache) {}
+
+  async onModuleDestroy() {
+    await this.cacheManager.store.client.quit();
+  }
+}
