@@ -4,6 +4,7 @@ import {
   CreateDateColumn,
   Entity,
   PrimaryGeneratedColumn,
+  UpdateDateColumn,
 } from 'typeorm';
 
 @Entity()
@@ -404,4 +405,90 @@ export class PlanetFilter {
 
   @Field(() => String, { nullable: true })
   terrain?: string;
+}
+
+@Entity()
+@ObjectType()
+export class Character {
+  @PrimaryGeneratedColumn()
+  @Field(() => ID)
+  id: string;
+
+  @Column()
+  @Field()
+  name: string;
+
+  @Column()
+  @Field(() => Int)
+  height: number;
+
+  @Column()
+  @Field(() => Int)
+  mass: number;
+
+  @Column()
+  @Field()
+  hair_color: string;
+
+  @Column()
+  @Field()
+  skin_color: string;
+
+  @Column()
+  @Field()
+  eye_color: string;
+
+  @Column()
+  @Field()
+  birth_year: string;
+
+  @Column()
+  @Field()
+  gender: string;
+
+  @Column()
+  @Field()
+  homeworld: string;
+
+  @Column('text', { array: true })
+  @Field(() => [String])
+  films: string[];
+
+  @Column('text', { array: true })
+  @Field(() => [String])
+  species: string[];
+
+  @Column('text', { array: true })
+  @Field(() => [String])
+  vehicles: string[];
+
+  @Column('text', { array: true })
+  @Field(() => [String])
+  starships: string[];
+
+  @CreateDateColumn()
+  @Field()
+  created: Date;
+
+  @UpdateDateColumn()
+  @Field()
+  updated: Date;
+}
+
+@ObjectType()
+export class CrawlAnalysisResult {
+  @Field(() => [WordCount])
+  uniqueWordPairs: WordCount[];
+
+  @Field(() => [String])
+  mostMentionedCharacters: string[];
+}
+
+@ObjectType()
+export class WordCount {
+  @Field()
+  word: string;
+
+  @Field(() => Int)
+  count: number;
 }

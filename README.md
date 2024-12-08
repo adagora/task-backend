@@ -1,12 +1,11 @@
+# Starwars GraphQL API
+
 run the app with `./start-dev-local.sh`
 
-GraphQL explorer:
+GraphQL explorer: http://localhost:3000/graphql
+example schema:
 
 ```
-http://localhost:3000/graphql
-
-example:
-
 query {
   films(pagination: { page: 1, perPage: 10 }) {
     title
@@ -28,8 +27,6 @@ query {
 }
 ```
 
-get a single resource by ID
-
 ```
 query {
   film(id: "1") {
@@ -37,4 +34,23 @@ query {
     director
   }
 }
+```
+
+```
+query {
+  analyzeOpeningCrawl {
+    uniqueWordPairs {
+      word
+      count
+    }
+    mostMentionedCharacters
+  }
+}
+```
+
+db:
+
+```
+psql -h localhost -p 5432 -U postgres -d postgres
+\dt
 ```

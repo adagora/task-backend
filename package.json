@@ -25,7 +25,7 @@
     "repl": " TZ=UTC nest start --entryFile repl --watch",
     "migration:generate": "npx typeorm-ts-node-commonjs migration:generate ./src/database/migrations/schema-update -d src/database/datasource.ts",
     "migration:show": "npx typeorm-ts-node-commonjs migration:show -d src/database/datasource.ts",
-    "migration:run": "npx typeorm-ts-node-commonjs migration:run -d  src/database/datasource.ts",
+    "migration:run": "npx typeorm-ts-node-commonjs migration:run -d src/database/datasource.ts",
     "migration:revert": "npx typeorm-ts-node-commonjs migration:revert -d src/database/datasource.ts"
   },
   "dependencies": {

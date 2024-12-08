@@ -1,6 +1,6 @@
-import { Query, Resolver, Args, ID } from '@nestjs/graphql';
+import { Query, Resolver, Args } from '@nestjs/graphql';
 import { HttpService } from '@nestjs/axios';
-import { BadRequestException, Inject, NotFoundException } from '@nestjs/common';
+import { Inject } from '@nestjs/common';
 import { firstValueFrom } from 'rxjs';
 import {
   Film,
@@ -13,6 +13,8 @@ import {
   VehicleFilter,
   StarshipFilter,
   PlanetFilter,
+  CrawlAnalysisResult,
+  Character,
 } from './starwars.entity';
 import { Pagination } from '../utils/pagination.gql-type';
 import { StarWarsApiResponse } from 'src/starwars/client/starwars-api-query-response.type';
@@ -28,20 +30,33 @@ export class StarWarsResolver {
     @Inject(CACHE_MANAGER) private cacheManager: RedisCache,
   ) {}
 
-  private handleNotFound(data: unknown, id: string, entity: string): void {
-    if (!data) {
-      throw new NotFoundException(`${entity} with id ${id} not found.`);
-    }
-  }
+  private async fetchAllPages<T>(
+    endpoint: string,
+    filterFn?: (item: T) => boolean,
+  ): Promise<T[]> {
+    const cacheKey = `${endpoint}_all`;
 
-  private handlePageNotFound(
-    data: { results?: unknown[] },
-    page: number,
-    entity: string,
-  ): void {
-    if (!data || !Array.isArray(data.results)) {
-      throw new NotFoundException(`No ${entity} found for page ${page}.`);
-    }
+    return this.getCachedData(cacheKey, async () => {
+      let allItems: T[] = [];
+      let nextUrl = `${this.baseUrl}/${endpoint}/`;
+
+      while (nextUrl) {
+        const response = await firstValueFrom(
+          this.httpService.get<StarWarsApiResponse<T>>(nextUrl),
+        );
+
+        let pageResults = response.data.results;
+
+        if (filterFn) {
+          pageResults = pageResults.filter(filterFn);
+        }
+
+        allItems = [...allItems, ...pageResults];
+        nextUrl = response.data.next as string;
+      }
+
+      return allItems;
+    });
   }
 
   private async getCachedData<T>(
@@ -49,18 +64,14 @@ export class StarWarsResolver {
     fetchData: () => Promise<T>,
   ): Promise<T> {
     const cachedData = await this.cacheManager.get<T>(cacheKey);
+    console.log('cache key:', cacheKey);
 
     if (cachedData) {
-      console.log(`Cache hit for key: ${cacheKey}`);
+      console.log('cached data existed?: yes');
       return cachedData;
     }
 
-    console.log(`Cache miss for key: ${cacheKey}. Fetching from API.`);
     const data = await fetchData();
-
-    if (!data) {
-      throw new NotFoundException(`Data not found for key: ${cacheKey}`);
-    }
 
     await this.cacheManager.set(
       cacheKey,
@@ -70,30 +81,21 @@ export class StarWarsResolver {
     return data;
   }
 
-  @Query(() => Film)
-  async film(@Args('id', { type: () => ID }) id: string): Promise<Film> {
-    if (!id) {
-      throw new BadRequestException('Film ID must be provided.');
-    }
-    const cacheKey = `films_${id}`;
-
-    return this.getCachedData(cacheKey, async () => {
-      const response = await firstValueFrom(
-        this.httpService.get<Film>(`${this.baseUrl}/films/${id}`),
-      );
-      return response.data;
-    });
-  }
-
   @Query(() => [Film])
   async films(
-    @Args('pagination') pagination: Pagination,
+    @Args('pagination', { nullable: true }) pagination?: Pagination,
     @Args('filter', { nullable: true }) filter?: FilmFilter,
   ): Promise<Film[]> {
     if (!pagination || !pagination.page) {
-      throw new BadRequestException(
-        'Pagination must be provided with a valid page number.',
-      );
+      return this.fetchAllPages<Film>('films', (film) => {
+        return (
+          (!filter?.title ||
+            film.title.toLowerCase().includes(filter.title.toLowerCase())) &&
+          (!filter?.episode_id || film.episode_id === filter.episode_id) &&
+          (!filter?.director ||
+            film.director.toLowerCase().includes(filter.director.toLowerCase()))
+        );
+      });
     }
 
     const cacheKey = `films_page_${pagination.page}`;
@@ -107,9 +109,7 @@ export class StarWarsResolver {
       const results = response.data.results;
 
       if (!results) {
-        throw new NotFoundException(
-          `No films found for page ${pagination.page}.`,
-        );
+        return [];
       }
 
       return filter
@@ -130,32 +130,26 @@ export class StarWarsResolver {
     });
   }
 
-  @Query(() => Species)
-  async speciesById(
-    @Args('id', { type: () => ID }) id: string,
-  ): Promise<Species> {
-    if (!id) {
-      throw new BadRequestException('Species ID must be provided.');
-    }
-
-    const cacheKey = `species_${id}`;
-    return this.getCachedData(cacheKey, async () => {
-      const response = await firstValueFrom(
-        this.httpService.get<Species>(`${this.baseUrl}/species/${id}`),
-      );
-      return response.data;
-    });
-  }
-
   @Query(() => [Species])
   async species(
-    @Args('pagination') pagination: Pagination,
+    @Args('pagination', { nullable: true }) pagination?: Pagination,
     @Args('filter', { nullable: true }) filter?: SpeciesFilter,
   ): Promise<Species[]> {
     if (!pagination || !pagination.page) {
-      throw new BadRequestException(
-        'Pagination must be provided with a valid page number.',
-      );
+      return this.fetchAllPages<Species>('species', (species) => {
+        return (
+          (!filter?.name ||
+            species.name.toLowerCase().includes(filter.name.toLowerCase())) &&
+          (!filter?.classification ||
+            species.classification
+              .toLowerCase()
+              .includes(filter.classification.toLowerCase())) &&
+          (!filter?.language ||
+            species.language
+              .toLowerCase()
+              .includes(filter.language.toLowerCase()))
+        );
+      });
     }
 
     const cacheKey = `species_page_${pagination.page}`;
@@ -169,9 +163,7 @@ export class StarWarsResolver {
       const results = response.data.results;
 
       if (!results) {
-        throw new NotFoundException(
-          `No species found for page ${pagination.page}.`,
-        );
+        return [];
       }
 
       return filter
@@ -195,32 +187,26 @@ export class StarWarsResolver {
     });
   }
 
-  @Query(() => Vehicle)
-  async vehicle(@Args('id', { type: () => ID }) id: string): Promise<Vehicle> {
-    if (!id) {
-      throw new BadRequestException('Vehicle ID must be provided.');
-    }
-    const cacheKey = `vehicles_${id}`;
-    return this.getCachedData(cacheKey, async () => {
-      const response = await firstValueFrom(
-        this.httpService.get<Vehicle>(`${this.baseUrl}/vehicles/${id}`),
-      );
-
-      this.handleNotFound(response.data, id, 'Vehicle');
-      return response.data;
-    });
-  }
-
   @Query(() => [Vehicle])
   async vehicles(
-    @Args('pagination') pagination: Pagination,
+    @Args('pagination', { nullable: true }) pagination?: Pagination,
     @Args('filter', { nullable: true }) filter?: VehicleFilter,
   ): Promise<Vehicle[]> {
     if (!pagination || !pagination.page) {
-      throw new BadRequestException(
-        'Pagination must be provided with a valid page number.',
-      );
+      return this.fetchAllPages<Vehicle>('vehicles', (vehicle) => {
+        return (
+          (!filter?.name ||
+            vehicle.name.toLowerCase().includes(filter.name.toLowerCase())) &&
+          (!filter?.model ||
+            vehicle.model.toLowerCase().includes(filter.model.toLowerCase())) &&
+          (!filter?.manufacturer ||
+            vehicle.manufacturer
+              .toLowerCase()
+              .includes(filter.manufacturer.toLowerCase()))
+        );
+      });
     }
+
     const cacheKey = `vehicles_page_${pagination.page}`;
     return this.getCachedData(cacheKey, async () => {
       const response = await firstValueFrom(
@@ -229,61 +215,56 @@ export class StarWarsResolver {
         ),
       );
 
-      this.handlePageNotFound(response.data, pagination.page, 'vehicles');
+      const results = response.data.results;
 
-      let results = response.data.results;
-
-      if (filter) {
-        results = results.filter((vehicle) => {
-          return (
-            (!filter.name ||
-              vehicle.name.toLowerCase().includes(filter.name.toLowerCase())) &&
-            (!filter.model ||
-              vehicle.model
-                .toLowerCase()
-                .includes(filter.model.toLowerCase())) &&
-            (!filter.manufacturer ||
-              vehicle.manufacturer
-                .toLowerCase()
-                .includes(filter.manufacturer.toLowerCase()))
-          );
-        });
+      if (!results) {
+        return [];
       }
 
-      return results;
-    });
-  }
-
-  @Query(() => Starship)
-  async starship(
-    @Args('id', { type: () => ID }) id: string,
-  ): Promise<Starship> {
-    if (!id) {
-      throw new BadRequestException('Starship ID must be provided.');
-    }
-    const cacheKey = `starships_${id}`;
-    return this.getCachedData(cacheKey, async () => {
-      const response = await firstValueFrom(
-        this.httpService.get<Starship>(`${this.baseUrl}/starships/${id}`),
-      );
-
-      this.handleNotFound(response.data, id, 'Starship');
-      return response.data;
+      return filter
+        ? results.filter((vehicle) => {
+            return (
+              (!filter.name ||
+                vehicle.name
+                  .toLowerCase()
+                  .includes(filter.name.toLowerCase())) &&
+              (!filter.model ||
+                vehicle.model
+                  .toLowerCase()
+                  .includes(filter.model.toLowerCase())) &&
+              (!filter.manufacturer ||
+                vehicle.manufacturer
+                  .toLowerCase()
+                  .includes(filter.manufacturer.toLowerCase()))
+            );
+          })
+        : results;
     });
   }
 
   @Query(() => [Starship])
   async starships(
-    @Args('pagination') pagination: Pagination,
+    @Args('pagination', { nullable: true }) pagination?: Pagination,
     @Args('filter', { nullable: true }) filter?: StarshipFilter,
   ): Promise<Starship[]> {
     if (!pagination || !pagination.page) {
-      throw new BadRequestException(
-        'Pagination must be provided with a valid page number.',
-      );
+      return this.fetchAllPages<Starship>('starships', (starship) => {
+        return (
+          (!filter?.name ||
+            starship.name.toLowerCase().includes(filter.name.toLowerCase())) &&
+          (!filter?.model ||
+            starship.model
+              .toLowerCase()
+              .includes(filter.model.toLowerCase())) &&
+          (!filter?.starship_class ||
+            starship.starship_class
+              .toLowerCase()
+              .includes(filter.starship_class.toLowerCase()))
+        );
+      });
     }
-    const cacheKey = `starships_page_${pagination.page}`;
 
+    const cacheKey = `starships_page_${pagination.page}`;
     return this.getCachedData(cacheKey, async () => {
       const response = await firstValueFrom(
         this.httpService.get<StarWarsApiResponse<Starship>>(
@@ -291,59 +272,51 @@ export class StarWarsResolver {
         ),
       );
 
-      this.handlePageNotFound(response.data, pagination.page, 'starships');
+      const results = response.data.results;
 
-      let results = response.data.results;
-
-      if (filter) {
-        results = results.filter((starship) => {
-          return (
-            (!filter.name ||
-              starship.name
-                .toLowerCase()
-                .includes(filter.name.toLowerCase())) &&
-            (!filter.model ||
-              starship.model
-                .toLowerCase()
-                .includes(filter.model.toLowerCase())) &&
-            (!filter.starship_class ||
-              starship.starship_class
-                .toLowerCase()
-                .includes(filter.starship_class.toLowerCase()))
-          );
-        });
+      if (!results) {
+        return [];
       }
 
-      return results;
-    });
-  }
-
-  @Query(() => Planet)
-  async planet(@Args('id', { type: () => ID }) id: string): Promise<Planet> {
-    if (!id) {
-      throw new BadRequestException('Planet ID must be provided.');
-    }
-
-    const cacheKey = `planets_${id}`;
-    return this.getCachedData(cacheKey, async () => {
-      const response = await firstValueFrom(
-        this.httpService.get<Planet>(`${this.baseUrl}/planets/${id}`),
-      );
-
-      this.handleNotFound(response.data, id, 'Planet');
-      return response.data;
+      return filter
+        ? results.filter((starship) => {
+            return (
+              (!filter.name ||
+                starship.name
+                  .toLowerCase()
+                  .includes(filter.name.toLowerCase())) &&
+              (!filter.model ||
+                starship.model
+                  .toLowerCase()
+                  .includes(filter.model.toLowerCase())) &&
+              (!filter.starship_class ||
+                starship.starship_class
+                  .toLowerCase()
+                  .includes(filter.starship_class.toLowerCase()))
+            );
+          })
+        : results;
     });
   }
 
   @Query(() => [Planet])
   async planets(
-    @Args('pagination') pagination: Pagination,
+    @Args('pagination', { nullable: true }) pagination?: Pagination,
     @Args('filter', { nullable: true }) filter?: PlanetFilter,
   ): Promise<Planet[]> {
     if (!pagination || !pagination.page) {
-      throw new BadRequestException(
-        'Pagination must be provided with a valid page number.',
-      );
+      return this.fetchAllPages<Planet>('planets', (planet) => {
+        return (
+          (!filter?.name ||
+            planet.name.toLowerCase().includes(filter.name.toLowerCase())) &&
+          (!filter?.climate ||
+            planet.climate
+              .toLowerCase()
+              .includes(filter.climate.toLowerCase())) &&
+          (!filter?.terrain ||
+            planet.terrain.toLowerCase().includes(filter.terrain.toLowerCase()))
+        );
+      });
     }
 
     const cacheKey = `planets_page_${pagination.page}`;
@@ -354,28 +327,92 @@ export class StarWarsResolver {
         ),
       );
 
-      this.handlePageNotFound(response.data, pagination.page, 'planets');
+      const results = response.data.results;
 
-      let results = response.data.results;
-
-      if (filter) {
-        results = results.filter((planet) => {
-          return (
-            (!filter.name ||
-              planet.name.toLowerCase().includes(filter.name.toLowerCase())) &&
-            (!filter.climate ||
-              planet.climate
-                .toLowerCase()
-                .includes(filter.climate.toLowerCase())) &&
-            (!filter.terrain ||
-              planet.terrain
-                .toLowerCase()
-                .includes(filter.terrain.toLowerCase()))
-          );
-        });
+      if (!results) {
+        return [];
       }
 
-      return results;
+      return filter
+        ? results.filter((planet) => {
+            return (
+              (!filter.name ||
+                planet.name
+                  .toLowerCase()
+                  .includes(filter.name.toLowerCase())) &&
+              (!filter.climate ||
+                planet.climate
+                  .toLowerCase()
+                  .includes(filter.climate.toLowerCase())) &&
+              (!filter.terrain ||
+                planet.terrain
+                  .toLowerCase()
+                  .includes(filter.terrain.toLowerCase()))
+            );
+          })
+        : results;
     });
+  }
+
+  private async getAllCharacters(): Promise<Character[]> {
+    const cacheKey = `characters_all`;
+    return this.getCachedData(cacheKey, async () => {
+      let allCharacters: Character[] = [];
+      let nextUrl = `${this.baseUrl}/people/`;
+
+      while (nextUrl) {
+        const response = await firstValueFrom(
+          this.httpService.get<StarWarsApiResponse<Character>>(nextUrl),
+        );
+        allCharacters = [...allCharacters, ...response.data.results];
+        nextUrl = response.data.next as string;
+      }
+      return allCharacters;
+    });
+  }
+
+  @Query(() => CrawlAnalysisResult)
+  async analyzeOpeningCrawl(): Promise<CrawlAnalysisResult> {
+    const films = await this.films();
+
+    const characters = await this.getAllCharacters();
+
+    const combinedText = films
+      .map((film) => film.opening_crawl)
+      .join(' ')
+      .toLowerCase();
+
+    const wordCounts = new Map<string, number>();
+    const words = combinedText.match(/\b\w+\b/g) || [];
+    for (const word of words) {
+      wordCounts.set(word, (wordCounts.get(word) || 0) + 1);
+    }
+    const uniqueWordPairs = Array.from(wordCounts.entries()).map(
+      ([word, count]) => ({
+        word,
+        count,
+      }),
+    );
+
+    const characterCounts = new Map<string, number>();
+    for (const character of characters) {
+      const name = character.name.toLowerCase();
+      const regex = new RegExp(`\\b${name}\\b`, 'g');
+      const count = (combinedText.match(regex) || []).length;
+      if (count > 0) {
+        characterCounts.set(character.name, count);
+      }
+    }
+
+    const maxCount = Math.max(...Array.from(characterCounts.values()));
+    const mostMentionedCharacters = Array.from(characterCounts.entries())
+      /* eslint-disable @typescript-eslint/no-unused-vars */
+      .filter(([_, count]) => count === maxCount)
+      .map(([name]) => name);
+
+    return {
+      uniqueWordPairs,
+      mostMentionedCharacters,
+    };
   }
 }
