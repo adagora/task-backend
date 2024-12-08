@@ -474,21 +474,3 @@ export class Character {
   @Field()
   updated: Date;
 }
-
-@ObjectType()
-export class CrawlAnalysisResult {
-  @Field(() => [WordCount])
-  uniqueWordPairs: WordCount[];
-
-  @Field(() => [String])
-  mostMentionedCharacters: string[];
-}
-
-@ObjectType()
-export class WordCount {
-  @Field()
-  word: string;
-
-  @Field(() => Int)
-  count: number;
-}

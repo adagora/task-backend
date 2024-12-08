@@ -13,13 +13,13 @@ import {
   VehicleFilter,
   StarshipFilter,
   PlanetFilter,
-  CrawlAnalysisResult,
   Character,
 } from './starwars.entity';
 import { Pagination } from '../utils/pagination.gql-type';
 import { StarWarsApiResponse } from 'src/starwars/client/starwars-api-query-response.type';
 import { RedisCache } from 'cache-manager-redis-yet';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { CrawlAnalysisResult } from 'src/utils/analysis.gql-type';
 
 @Resolver()
 export class StarWarsResolver {
