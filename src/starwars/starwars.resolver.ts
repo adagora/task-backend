@@ -1,6 +1,6 @@
-import { Query, Resolver, Args } from '@nestjs/graphql';
+import { Query, Resolver, Args, ID } from '@nestjs/graphql';
 import { HttpService } from '@nestjs/axios';
-import { Inject } from '@nestjs/common';
+import { BadRequestException, Inject, NotFoundException } from '@nestjs/common';
 import { firstValueFrom } from 'rxjs';
 import {
   Film,
@@ -136,6 +136,21 @@ export class StarWarsResolver {
     });
   }
 
+  @Query(() => Film, { description: 'Fetch individual film.' })
+  async film(@Args('id', { type: () => ID }) id: string): Promise<Film> {
+    if (!id) {
+      throw new BadRequestException('Film ID must be provided.');
+    }
+    const cacheKey = `films_${id}`;
+
+    return this.getCachedData(cacheKey, async () => {
+      const response = await firstValueFrom(
+        this.httpService.get<Film>(`${this.baseUrl}/films/${id}`),
+      );
+      return response.data;
+    });
+  }
+
   @Query(() => [Species], { description: 'Fetch a list of Star Wars species.' })
   async species(
     @Args('pagination', { nullable: true }) pagination?: Pagination,
@@ -190,6 +205,22 @@ export class StarWarsResolver {
             );
           })
         : results;
+    });
+  }
+  @Query(() => Species, { description: 'Fetch individual species.' })
+  async speciesById(
+    @Args('id', { type: () => ID }) id: string,
+  ): Promise<Species> {
+    if (!id) {
+      throw new BadRequestException('Species ID must be provided.');
+    }
+
+    const cacheKey = `species_${id}`;
+    return this.getCachedData(cacheKey, async () => {
+      const response = await firstValueFrom(
+        this.httpService.get<Species>(`${this.baseUrl}/species/${id}`),
+      );
+      return response.data;
     });
   }
 
@@ -247,6 +278,22 @@ export class StarWarsResolver {
             );
           })
         : results;
+    });
+  }
+
+  @Query(() => Vehicle, { description: 'Fetch individual vehicle.' })
+  async vehicle(@Args('id', { type: () => ID }) id: string): Promise<Vehicle> {
+    if (!id) {
+      throw new BadRequestException('Vehicle ID must be provided.');
+    }
+    const cacheKey = `vehicles_${id}`;
+    return this.getCachedData(cacheKey, async () => {
+      const response = await firstValueFrom(
+        this.httpService.get<Vehicle>(`${this.baseUrl}/vehicles/${id}`),
+      );
+
+      this.handleNotFound(response.data, id, 'Vehicle');
+      return response.data;
     });
   }
 
@@ -309,6 +356,24 @@ export class StarWarsResolver {
     });
   }
 
+  @Query(() => Starship, { description: 'Fetch individual starship' })
+  async starship(
+    @Args('id', { type: () => ID }) id: string,
+  ): Promise<Starship> {
+    if (!id) {
+      throw new BadRequestException('Starship ID must be provided.');
+    }
+    const cacheKey = `starships_${id}`;
+    return this.getCachedData(cacheKey, async () => {
+      const response = await firstValueFrom(
+        this.httpService.get<Starship>(`${this.baseUrl}/starships/${id}`),
+      );
+
+      this.handleNotFound(response.data, id, 'Starship');
+      return response.data;
+    });
+  }
+
   @Query(() => [Planet], { description: 'Fetch a list of Star Wars planets.' })
   async planets(
     @Args('pagination', { nullable: true }) pagination?: Pagination,
@@ -361,6 +426,23 @@ export class StarWarsResolver {
             );
           })
         : results;
+    });
+  }
+
+  @Query(() => Planet, { description: 'Fetch individual planet.' })
+  async planet(@Args('id', { type: () => ID }) id: string): Promise<Planet> {
+    if (!id) {
+      throw new BadRequestException('Planet ID must be provided.');
+    }
+
+    const cacheKey = `planets_${id}`;
+    return this.getCachedData(cacheKey, async () => {
+      const response = await firstValueFrom(
+        this.httpService.get<Planet>(`${this.baseUrl}/planets/${id}`),
+      );
+
+      this.handleNotFound(response.data, id, 'Planet');
+      return response.data;
     });
   }
 
@@ -434,5 +516,10 @@ export class StarWarsResolver {
       uniqueWordPairs,
       mostMentionedCharacters,
     };
+  }
+  private handleNotFound(data: unknown, id: string, entity: string): void {
+    if (!data) {
+      throw new NotFoundException(`${entity} with id ${id} not found.`);
+    }
   }
 }
