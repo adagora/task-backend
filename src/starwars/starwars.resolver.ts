@@ -21,6 +21,12 @@ import { RedisCache } from 'cache-manager-redis-yet';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { CrawlAnalysisResult } from 'src/utils/analysis.gql-type';
 
+/**
+ * GraphQL Resolver for Star Wars API.
+ * - Fetches data from SWAPI endpoints (films, species, vehicles, starships, and planets).
+ * - Implements caching to optimize API requests.
+ * - Provides pagination and filtering for queries.
+ */
 @Resolver()
 export class StarWarsResolver {
   private readonly baseUrl = 'https://swapi.dev/api';
