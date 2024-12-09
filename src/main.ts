@@ -15,10 +15,10 @@ async function bootstrap() {
   app.enableCors();
 
   const config = new DocumentBuilder()
-    .setTitle('Earthquakes')
-    .setDescription('Earthquakes API')
+    .setTitle('Starwars')
+    .setDescription('Starwars API REST')
     .setVersion('1.0')
-    .addTag('earthquakes')
+    .addTag('starwars')
     .build();
 
   const documentFactory = () =>

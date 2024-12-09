@@ -87,7 +87,7 @@ export class StarWarsResolver {
     return data;
   }
 
-  @Query(() => [Film])
+  @Query(() => [Film], { description: 'Fetch a list of Star Wars films.' })
   async films(
     @Args('pagination', { nullable: true }) pagination?: Pagination,
     @Args('filter', { nullable: true }) filter?: FilmFilter,
@@ -136,7 +136,7 @@ export class StarWarsResolver {
     });
   }
 
-  @Query(() => [Species])
+  @Query(() => [Species], { description: 'Fetch a list of Star Wars species.' })
   async species(
     @Args('pagination', { nullable: true }) pagination?: Pagination,
     @Args('filter', { nullable: true }) filter?: SpeciesFilter,
@@ -193,7 +193,9 @@ export class StarWarsResolver {
     });
   }
 
-  @Query(() => [Vehicle])
+  @Query(() => [Vehicle], {
+    description: 'Fetch a list of Star Wars vehicles.',
+  })
   async vehicles(
     @Args('pagination', { nullable: true }) pagination?: Pagination,
     @Args('filter', { nullable: true }) filter?: VehicleFilter,
@@ -248,7 +250,9 @@ export class StarWarsResolver {
     });
   }
 
-  @Query(() => [Starship])
+  @Query(() => [Starship], {
+    description: 'Fetch a list of Star Wars starships.',
+  })
   async starships(
     @Args('pagination', { nullable: true }) pagination?: Pagination,
     @Args('filter', { nullable: true }) filter?: StarshipFilter,
@@ -305,7 +309,7 @@ export class StarWarsResolver {
     });
   }
 
-  @Query(() => [Planet])
+  @Query(() => [Planet], { description: 'Fetch a list of Star Wars planets.' })
   async planets(
     @Args('pagination', { nullable: true }) pagination?: Pagination,
     @Args('filter', { nullable: true }) filter?: PlanetFilter,
@@ -377,7 +381,17 @@ export class StarWarsResolver {
     });
   }
 
-  @Query(() => CrawlAnalysisResult)
+  /**
+   * Analyze the opening crawl of Star Wars films.
+   *
+   * - Counts unique words in the opening crawl texts.
+   * - Identifies the most mentioned characters in the opening crawls.
+   *
+   * @returns An analysis result containing unique word counts and the most mentioned characters.
+   */
+  @Query(() => CrawlAnalysisResult, {
+    description: 'Analyze the opening crawl of Star Wars films.',
+  })
   async analyzeOpeningCrawl(): Promise<CrawlAnalysisResult> {
     const films = await this.films();
 
