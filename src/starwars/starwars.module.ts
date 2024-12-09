@@ -9,12 +9,13 @@ import {
   Starship,
   Vehicle,
 } from 'src/starwars/starwars.entity';
+import { StarwarsScheduler } from 'src/starwars/starwars.scheduler';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Film, Species, Vehicle, Starship, Planet]),
     HttpModule,
   ],
-  providers: [StarWarsResolver],
+  providers: [StarWarsResolver, StarwarsScheduler],
 })
 export class StarWarsModule {}
