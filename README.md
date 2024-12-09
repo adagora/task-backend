@@ -1,6 +1,9 @@
 # Starwars GraphQL API
 
-run the app with `./start-dev-local.sh`
+## run the app with 
+```
+./start-dev-local.sh
+```
 
 GraphQL explorer: http://localhost:3000/graphql
 example schema:
@@ -48,9 +51,3 @@ query {
 }
 ```
 
-db:
-
-```
-psql -h localhost -p 5432 -U postgres -d postgres
-\dt
-```
