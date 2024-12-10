@@ -1,29 +1,23 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { StarWarsResolver } from 'src/starwars/starwars.resolver';
 
 @Injectable()
-export class StarwarsScheduler {
+export class StarwarsScheduler implements OnApplicationBootstrap {
   private readonly logger = new Logger(StarwarsScheduler.name);
   constructor(private readonly starWarsResolver: StarWarsResolver) {}
 
-  async OnApplicationBootstrap() {
-    const timer = setTimeout(async () => {
-      await Promise.all([
-        this.starWarsResolver.films(),
-        this.starWarsResolver.species(),
-        this.starWarsResolver.vehicles(),
-        this.starWarsResolver.starships(),
-        this.starWarsResolver.planets(),
-      ]);
-      return () => {
-        clearTimeout(timer);
-      };
-    }, 5000);
+  async onApplicationBootstrap() {
+    try {
+      await this.syncStarwarsData();
+    } catch (error) {
+      this.logger.error('Initial synchronization failed:', error);
+    }
   }
 
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
   async syncStarwarsData() {
+    this.logger.log('Data synchronization started');
     try {
       await Promise.all([
         this.starWarsResolver.films(),
@@ -32,9 +26,10 @@ export class StarwarsScheduler {
         this.starWarsResolver.starships(),
         this.starWarsResolver.planets(),
       ]);
-      this.logger.log('Star Wars data synchronized successfully');
+      this.logger.log('Data synchronization complete.');
     } catch (error) {
-      this.logger.error('Error synchronizing Star Wars data:', error);
+      this.logger.error('Data synchronization failed:', error);
+      throw error;
     }
   }
   async updateSpecificEntity(type: string, id: string) {
