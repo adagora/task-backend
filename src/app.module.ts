@@ -9,6 +9,8 @@ import { StarWarsModule } from './starwars/starwars.module';
 import { CACHE_MANAGER, CacheModule } from '@nestjs/cache-manager';
 
 import { RedisCache, redisStore } from 'cache-manager-redis-yet';
+import { GraphQLCacheInterceptor } from './interceptors/cache.interceptor';
+import { APP_INTERCEPTOR } from '@nestjs/core';
 
 @Module({
   imports: [
@@ -43,6 +45,10 @@ import { RedisCache, redisStore } from 'cache-manager-redis-yet';
     {
       provide: APP_PIPE,
       useValue: new ValidationPipe({ transform: true }),
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: GraphQLCacheInterceptor,
     },
   ],
 })

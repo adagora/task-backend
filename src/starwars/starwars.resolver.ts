@@ -1,6 +1,10 @@
 import { Query, Resolver, Args, ID } from '@nestjs/graphql';
 import { HttpService } from '@nestjs/axios';
-import { BadRequestException, Inject, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  NotFoundException,
+  UseInterceptors,
+} from '@nestjs/common';
 import { firstValueFrom } from 'rxjs';
 import {
   Film,
@@ -17,9 +21,8 @@ import {
 } from './starwars.entity';
 import { Pagination } from '../utils/pagination.gql-type';
 import { StarWarsApiResponse } from 'src/starwars/client/starwars-api-query-response.type';
-import { RedisCache } from 'cache-manager-redis-yet';
-import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { CrawlAnalysisResult } from 'src/utils/analysis.gql-type';
+import { GraphQLCacheInterceptor } from 'src/interceptors/cache.interceptor';
 
 /**
  * GraphQL Resolver for Star Wars API.
@@ -28,66 +31,36 @@ import { CrawlAnalysisResult } from 'src/utils/analysis.gql-type';
  * - Provides pagination and filtering for queries.
  */
 @Resolver()
+@UseInterceptors(GraphQLCacheInterceptor)
 export class StarWarsResolver {
-  private readonly baseUrl = 'https://swapi.dev/api';
-
-  constructor(
-    private readonly httpService: HttpService,
-    @Inject(CACHE_MANAGER) private cacheManager: RedisCache,
-  ) {}
+  private readonly baseUrl = 'https://swapi.py4e.com/api';
+  constructor(private readonly httpService: HttpService) {}
 
   private async fetchAllPages<T>(
     endpoint: string,
     filterFn?: (item: T) => boolean,
   ): Promise<T[]> {
-    const cacheKey = `${endpoint}_all`;
+    let allItems: T[] = [];
+    let nextUrl = `${this.baseUrl}/${endpoint}/`;
 
-    return this.getCachedData(cacheKey, async () => {
-      let allItems: T[] = [];
-      let nextUrl = `${this.baseUrl}/${endpoint}/`;
+    while (nextUrl) {
+      const response = await firstValueFrom(
+        this.httpService.get<StarWarsApiResponse<T>>(nextUrl),
+      );
+      let pageResults = response.data.results;
 
-      while (nextUrl) {
-        const response = await firstValueFrom(
-          this.httpService.get<StarWarsApiResponse<T>>(nextUrl),
-        );
-
-        let pageResults = response.data.results;
-
-        if (filterFn) {
-          pageResults = pageResults.filter(filterFn);
-        }
-
-        allItems = [...allItems, ...pageResults];
-        nextUrl = response.data.next as string;
+      if (filterFn) {
+        pageResults = pageResults.filter(filterFn);
       }
 
-      return allItems;
-    });
-  }
-
-  private async getCachedData<T>(
-    cacheKey: string,
-    fetchData: () => Promise<T>,
-  ): Promise<T> {
-    const cachedData = await this.cacheManager.get<T>(cacheKey);
-    console.log('cache key:', cacheKey);
-
-    if (cachedData) {
-      console.log('cached data existed?: yes');
-      return cachedData;
+      allItems = [...allItems, ...pageResults];
+      nextUrl = response.data.next as string;
     }
 
-    const data = await fetchData();
-
-    await this.cacheManager.set(
-      cacheKey,
-      data,
-      parseInt(process.env.CACHE_DEFAULT_TTL!),
-    );
-    return data;
+    return allItems;
   }
 
-  @Query(() => [Film], { description: 'Fetch a list of Star Wars films.' })
+  @Query(() => [Film])
   async films(
     @Args('pagination', { nullable: true }) pagination?: Pagination,
     @Args('filter', { nullable: true }) filter?: FilmFilter,
@@ -104,36 +77,31 @@ export class StarWarsResolver {
       });
     }
 
-    const cacheKey = `films_page_${pagination.page}`;
-    return this.getCachedData(cacheKey, async () => {
-      const response = await firstValueFrom(
-        this.httpService.get<StarWarsApiResponse<Film>>(
-          `${this.baseUrl}/films/?page=${pagination.page}`,
-        ),
-      );
+    const response = await firstValueFrom(
+      this.httpService.get<StarWarsApiResponse<Film>>(
+        `${this.baseUrl}/films/?page=${pagination.page}`,
+      ),
+    );
 
-      const results = response.data.results;
+    const results = response.data.results;
 
-      if (!results) {
-        return [];
-      }
+    if (!results) {
+      return [];
+    }
 
-      return filter
-        ? results.filter((film) => {
-            return (
-              (!filter.title ||
-                film.title
-                  .toLowerCase()
-                  .includes(filter.title.toLowerCase())) &&
-              (!filter.episode_id || film.episode_id === filter.episode_id) &&
-              (!filter.director ||
-                film.director
-                  .toLowerCase()
-                  .includes(filter.director.toLowerCase()))
-            );
-          })
-        : results;
-    });
+    return filter
+      ? results.filter((film) => {
+          return (
+            (!filter.title ||
+              film.title.toLowerCase().includes(filter.title.toLowerCase())) &&
+            (!filter.episode_id || film.episode_id === filter.episode_id) &&
+            (!filter.director ||
+              film.director
+                .toLowerCase()
+                .includes(filter.director.toLowerCase()))
+          );
+        })
+      : results;
   }
 
   @Query(() => Film, { description: 'Fetch individual film.' })
@@ -141,14 +109,11 @@ export class StarWarsResolver {
     if (!id) {
       throw new BadRequestException('Film ID must be provided.');
     }
-    const cacheKey = `films_${id}`;
 
-    return this.getCachedData(cacheKey, async () => {
-      const response = await firstValueFrom(
-        this.httpService.get<Film>(`${this.baseUrl}/films/${id}`),
-      );
-      return response.data;
-    });
+    const response = await firstValueFrom(
+      this.httpService.get<Film>(`${this.baseUrl}/films/${id}`),
+    );
+    return response.data;
   }
 
   @Query(() => [Species], { description: 'Fetch a list of Star Wars species.' })
@@ -173,40 +138,36 @@ export class StarWarsResolver {
       });
     }
 
-    const cacheKey = `species_page_${pagination.page}`;
-    return this.getCachedData(cacheKey, async () => {
-      const response = await firstValueFrom(
-        this.httpService.get<StarWarsApiResponse<Species>>(
-          `${this.baseUrl}/species/?page=${pagination.page}`,
-        ),
-      );
+    const response = await firstValueFrom(
+      this.httpService.get<StarWarsApiResponse<Species>>(
+        `${this.baseUrl}/species/?page=${pagination.page}`,
+      ),
+    );
 
-      const results = response.data.results;
+    const results = response.data.results;
 
-      if (!results) {
-        return [];
-      }
+    if (!results) {
+      return [];
+    }
 
-      return filter
-        ? results.filter((species) => {
-            return (
-              (!filter.name ||
-                species.name
-                  .toLowerCase()
-                  .includes(filter.name.toLowerCase())) &&
-              (!filter.classification ||
-                species.classification
-                  .toLowerCase()
-                  .includes(filter.classification.toLowerCase())) &&
-              (!filter.language ||
-                species.language
-                  .toLowerCase()
-                  .includes(filter.language.toLowerCase()))
-            );
-          })
-        : results;
-    });
+    return filter
+      ? results.filter((species) => {
+          return (
+            (!filter.name ||
+              species.name.toLowerCase().includes(filter.name.toLowerCase())) &&
+            (!filter.classification ||
+              species.classification
+                .toLowerCase()
+                .includes(filter.classification.toLowerCase())) &&
+            (!filter.language ||
+              species.language
+                .toLowerCase()
+                .includes(filter.language.toLowerCase()))
+          );
+        })
+      : results;
   }
+
   @Query(() => Species, { description: 'Fetch individual species.' })
   async speciesById(
     @Args('id', { type: () => ID }) id: string,
@@ -215,13 +176,10 @@ export class StarWarsResolver {
       throw new BadRequestException('Species ID must be provided.');
     }
 
-    const cacheKey = `species_${id}`;
-    return this.getCachedData(cacheKey, async () => {
-      const response = await firstValueFrom(
-        this.httpService.get<Species>(`${this.baseUrl}/species/${id}`),
-      );
-      return response.data;
-    });
+    const response = await firstValueFrom(
+      this.httpService.get<Species>(`${this.baseUrl}/species/${id}`),
+    );
+    return response.data;
   }
 
   @Query(() => [Vehicle], {
@@ -246,39 +204,34 @@ export class StarWarsResolver {
       });
     }
 
-    const cacheKey = `vehicles_page_${pagination.page}`;
-    return this.getCachedData(cacheKey, async () => {
-      const response = await firstValueFrom(
-        this.httpService.get<StarWarsApiResponse<Vehicle>>(
-          `${this.baseUrl}/vehicles/?page=${pagination.page}`,
-        ),
-      );
+    const response = await firstValueFrom(
+      this.httpService.get<StarWarsApiResponse<Vehicle>>(
+        `${this.baseUrl}/vehicles/?page=${pagination.page}`,
+      ),
+    );
 
-      const results = response.data.results;
+    const results = response.data.results;
 
-      if (!results) {
-        return [];
-      }
+    if (!results) {
+      return [];
+    }
 
-      return filter
-        ? results.filter((vehicle) => {
-            return (
-              (!filter.name ||
-                vehicle.name
-                  .toLowerCase()
-                  .includes(filter.name.toLowerCase())) &&
-              (!filter.model ||
-                vehicle.model
-                  .toLowerCase()
-                  .includes(filter.model.toLowerCase())) &&
-              (!filter.manufacturer ||
-                vehicle.manufacturer
-                  .toLowerCase()
-                  .includes(filter.manufacturer.toLowerCase()))
-            );
-          })
-        : results;
-    });
+    return filter
+      ? results.filter((vehicle) => {
+          return (
+            (!filter.name ||
+              vehicle.name.toLowerCase().includes(filter.name.toLowerCase())) &&
+            (!filter.model ||
+              vehicle.model
+                .toLowerCase()
+                .includes(filter.model.toLowerCase())) &&
+            (!filter.manufacturer ||
+              vehicle.manufacturer
+                .toLowerCase()
+                .includes(filter.manufacturer.toLowerCase()))
+          );
+        })
+      : results;
   }
 
   @Query(() => Vehicle, { description: 'Fetch individual vehicle.' })
@@ -286,15 +239,13 @@ export class StarWarsResolver {
     if (!id) {
       throw new BadRequestException('Vehicle ID must be provided.');
     }
-    const cacheKey = `vehicles_${id}`;
-    return this.getCachedData(cacheKey, async () => {
-      const response = await firstValueFrom(
-        this.httpService.get<Vehicle>(`${this.baseUrl}/vehicles/${id}`),
-      );
 
-      this.handleNotFound(response.data, id, 'Vehicle');
-      return response.data;
-    });
+    const response = await firstValueFrom(
+      this.httpService.get<Vehicle>(`${this.baseUrl}/vehicles/${id}`),
+    );
+
+    this.handleNotFound(response.data, id, 'Vehicle');
+    return response.data;
   }
 
   @Query(() => [Starship], {
@@ -321,39 +272,36 @@ export class StarWarsResolver {
       });
     }
 
-    const cacheKey = `starships_page_${pagination.page}`;
-    return this.getCachedData(cacheKey, async () => {
-      const response = await firstValueFrom(
-        this.httpService.get<StarWarsApiResponse<Starship>>(
-          `${this.baseUrl}/starships/?page=${pagination.page}`,
-        ),
-      );
+    const response = await firstValueFrom(
+      this.httpService.get<StarWarsApiResponse<Starship>>(
+        `${this.baseUrl}/starships/?page=${pagination.page}`,
+      ),
+    );
 
-      const results = response.data.results;
+    const results = response.data.results;
 
-      if (!results) {
-        return [];
-      }
+    if (!results) {
+      return [];
+    }
 
-      return filter
-        ? results.filter((starship) => {
-            return (
-              (!filter.name ||
-                starship.name
-                  .toLowerCase()
-                  .includes(filter.name.toLowerCase())) &&
-              (!filter.model ||
-                starship.model
-                  .toLowerCase()
-                  .includes(filter.model.toLowerCase())) &&
-              (!filter.starship_class ||
-                starship.starship_class
-                  .toLowerCase()
-                  .includes(filter.starship_class.toLowerCase()))
-            );
-          })
-        : results;
-    });
+    return filter
+      ? results.filter((starship) => {
+          return (
+            (!filter.name ||
+              starship.name
+                .toLowerCase()
+                .includes(filter.name.toLowerCase())) &&
+            (!filter.model ||
+              starship.model
+                .toLowerCase()
+                .includes(filter.model.toLowerCase())) &&
+            (!filter.starship_class ||
+              starship.starship_class
+                .toLowerCase()
+                .includes(filter.starship_class.toLowerCase()))
+          );
+        })
+      : results;
   }
 
   @Query(() => Starship, { description: 'Fetch individual starship' })
@@ -363,15 +311,13 @@ export class StarWarsResolver {
     if (!id) {
       throw new BadRequestException('Starship ID must be provided.');
     }
-    const cacheKey = `starships_${id}`;
-    return this.getCachedData(cacheKey, async () => {
-      const response = await firstValueFrom(
-        this.httpService.get<Starship>(`${this.baseUrl}/starships/${id}`),
-      );
 
-      this.handleNotFound(response.data, id, 'Starship');
-      return response.data;
-    });
+    const response = await firstValueFrom(
+      this.httpService.get<Starship>(`${this.baseUrl}/starships/${id}`),
+    );
+
+    this.handleNotFound(response.data, id, 'Starship');
+    return response.data;
   }
 
   @Query(() => [Planet], { description: 'Fetch a list of Star Wars planets.' })
@@ -394,39 +340,34 @@ export class StarWarsResolver {
       });
     }
 
-    const cacheKey = `planets_page_${pagination.page}`;
-    return this.getCachedData(cacheKey, async () => {
-      const response = await firstValueFrom(
-        this.httpService.get<StarWarsApiResponse<Planet>>(
-          `${this.baseUrl}/planets/?page=${pagination.page}`,
-        ),
-      );
+    const response = await firstValueFrom(
+      this.httpService.get<StarWarsApiResponse<Planet>>(
+        `${this.baseUrl}/planets/?page=${pagination.page}`,
+      ),
+    );
 
-      const results = response.data.results;
+    const results = response.data.results;
 
-      if (!results) {
-        return [];
-      }
+    if (!results) {
+      return [];
+    }
 
-      return filter
-        ? results.filter((planet) => {
-            return (
-              (!filter.name ||
-                planet.name
-                  .toLowerCase()
-                  .includes(filter.name.toLowerCase())) &&
-              (!filter.climate ||
-                planet.climate
-                  .toLowerCase()
-                  .includes(filter.climate.toLowerCase())) &&
-              (!filter.terrain ||
-                planet.terrain
-                  .toLowerCase()
-                  .includes(filter.terrain.toLowerCase()))
-            );
-          })
-        : results;
-    });
+    return filter
+      ? results.filter((planet) => {
+          return (
+            (!filter.name ||
+              planet.name.toLowerCase().includes(filter.name.toLowerCase())) &&
+            (!filter.climate ||
+              planet.climate
+                .toLowerCase()
+                .includes(filter.climate.toLowerCase())) &&
+            (!filter.terrain ||
+              planet.terrain
+                .toLowerCase()
+                .includes(filter.terrain.toLowerCase()))
+          );
+        })
+      : results;
   }
 
   @Query(() => Planet, { description: 'Fetch individual planet.' })
@@ -435,32 +376,26 @@ export class StarWarsResolver {
       throw new BadRequestException('Planet ID must be provided.');
     }
 
-    const cacheKey = `planets_${id}`;
-    return this.getCachedData(cacheKey, async () => {
-      const response = await firstValueFrom(
-        this.httpService.get<Planet>(`${this.baseUrl}/planets/${id}`),
-      );
+    const response = await firstValueFrom(
+      this.httpService.get<Planet>(`${this.baseUrl}/planets/${id}`),
+    );
 
-      this.handleNotFound(response.data, id, 'Planet');
-      return response.data;
-    });
+    this.handleNotFound(response.data, id, 'Planet');
+    return response.data;
   }
 
   private async getAllCharacters(): Promise<Character[]> {
-    const cacheKey = `characters_all`;
-    return this.getCachedData(cacheKey, async () => {
-      let allCharacters: Character[] = [];
-      let nextUrl = `${this.baseUrl}/people/`;
+    let allCharacters: Character[] = [];
+    let nextUrl = `${this.baseUrl}/people/`;
 
-      while (nextUrl) {
-        const response = await firstValueFrom(
-          this.httpService.get<StarWarsApiResponse<Character>>(nextUrl),
-        );
-        allCharacters = [...allCharacters, ...response.data.results];
-        nextUrl = response.data.next as string;
-      }
-      return allCharacters;
-    });
+    while (nextUrl) {
+      const response = await firstValueFrom(
+        this.httpService.get<StarWarsApiResponse<Character>>(nextUrl),
+      );
+      allCharacters = [...allCharacters, ...response.data.results];
+      nextUrl = response.data.next as string;
+    }
+    return allCharacters;
   }
 
   /**
@@ -517,6 +452,7 @@ export class StarWarsResolver {
       mostMentionedCharacters,
     };
   }
+
   private handleNotFound(data: unknown, id: string, entity: string): void {
     if (!data) {
       throw new NotFoundException(`${entity} with id ${id} not found.`);
