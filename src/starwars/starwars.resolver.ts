@@ -1,4 +1,4 @@
-import { Query, Resolver, Args, ID } from '@nestjs/graphql';
+import { Query, Resolver, Args, ID, ObjectType } from '@nestjs/graphql';
 import { HttpService } from '@nestjs/axios';
 import {
   BadRequestException,
@@ -19,17 +19,30 @@ import {
   PlanetFilter,
   Character,
 } from './starwars.entity';
-import { Pagination } from '../utils/pagination.gql-type';
+import {
+  Pagination,
+  DefaultPagination,
+  Paginated,
+} from '../utils/pagination.gql-type';
 import { StarWarsApiResponse } from 'src/starwars/client/starwars-api-query-response.type';
 import { CrawlAnalysisResult } from 'src/utils/analysis.gql-type';
 import { GraphQLCacheInterceptor } from 'src/interceptors/cache.interceptor';
 
-/**
- * GraphQL Resolver for Star Wars API.
- * - Fetches data from SWAPI endpoints (films, species, vehicles, starships, and planets).
- * - Implements caching to optimize API requests.
- * - Provides pagination and filtering for queries.
- */
+@ObjectType()
+class PaginatedFilms extends Paginated(Film) {}
+
+@ObjectType()
+class PaginatedSpecies extends Paginated(Species) {}
+
+@ObjectType()
+class PaginatedVehicles extends Paginated(Vehicle) {}
+
+@ObjectType()
+class PaginatedStarships extends Paginated(Starship) {}
+
+@ObjectType()
+class PaginatedPlanets extends Paginated(Planet) {}
+
 @Resolver()
 @UseInterceptors(GraphQLCacheInterceptor)
 export class StarWarsResolver {
@@ -60,51 +73,50 @@ export class StarWarsResolver {
     return allItems;
   }
 
-  @Query(() => [Film])
+  private paginateResults<T>(items: T[], pagination?: Pagination) {
+    if (!pagination?.page || !pagination?.perPage) {
+      return {
+        items: items,
+        pagination: null,
+      };
+    }
+
+    const startIndex = (pagination.page - 1) * pagination.perPage;
+    const endIndex = startIndex + pagination.perPage;
+    const paginatedItems = items.slice(startIndex, endIndex);
+
+    return {
+      items: paginatedItems,
+      pagination: {
+        currentPage: pagination.page,
+        perPage: pagination.perPage,
+        totalItems: items.length,
+        totalPages: Math.ceil(items.length / pagination.perPage),
+        hasNextPage: endIndex < items.length,
+        hasPreviousPage: pagination.page > 1,
+      },
+    };
+  }
+
+  @Query(() => PaginatedFilms || Film)
   async films(
     @Args('pagination', { nullable: true }) pagination?: Pagination,
     @Args('filter', { nullable: true }) filter?: FilmFilter,
-  ): Promise<Film[]> {
-    if (!pagination || !pagination.page) {
-      return this.fetchAllPages<Film>('films', (film) => {
-        return (
-          (!filter?.title ||
-            film.title.toLowerCase().includes(filter.title.toLowerCase())) &&
-          (!filter?.episode_id || film.episode_id === filter.episode_id) &&
-          (!filter?.director ||
-            film.director.toLowerCase().includes(filter.director.toLowerCase()))
-        );
-      });
-    }
+  ): Promise<PaginatedFilms> {
+    const allFilms = await this.fetchAllPages<Film>('films', (film) => {
+      return (
+        (!filter?.title ||
+          film.title.toLowerCase().includes(filter.title.toLowerCase())) &&
+        (!filter?.episode_id || film.episode_id === filter.episode_id) &&
+        (!filter?.director ||
+          film.director.toLowerCase().includes(filter.director.toLowerCase()))
+      );
+    });
 
-    const response = await firstValueFrom(
-      this.httpService.get<StarWarsApiResponse<Film>>(
-        `${this.baseUrl}/films/?page=${pagination.page}`,
-      ),
-    );
-
-    const results = response.data.results;
-
-    if (!results) {
-      return [];
-    }
-
-    return filter
-      ? results.filter((film) => {
-          return (
-            (!filter.title ||
-              film.title.toLowerCase().includes(filter.title.toLowerCase())) &&
-            (!filter.episode_id || film.episode_id === filter.episode_id) &&
-            (!filter.director ||
-              film.director
-                .toLowerCase()
-                .includes(filter.director.toLowerCase()))
-          );
-        })
-      : results;
+    return this.paginateResults(allFilms, pagination);
   }
 
-  @Query(() => Film, { description: 'Fetch individual film.' })
+  @Query(() => Film)
   async film(@Args('id', { type: () => ID }) id: string): Promise<Film> {
     if (!id) {
       throw new BadRequestException('Film ID must be provided.');
@@ -116,13 +128,14 @@ export class StarWarsResolver {
     return response.data;
   }
 
-  @Query(() => [Species], { description: 'Fetch a list of Star Wars species.' })
+  @Query(() => PaginatedSpecies)
   async species(
     @Args('pagination', { nullable: true }) pagination?: Pagination,
     @Args('filter', { nullable: true }) filter?: SpeciesFilter,
-  ): Promise<Species[]> {
-    if (!pagination || !pagination.page) {
-      return this.fetchAllPages<Species>('species', (species) => {
+  ): Promise<PaginatedSpecies> {
+    const allSpecies = await this.fetchAllPages<Species>(
+      'species',
+      (species) => {
         return (
           (!filter?.name ||
             species.name.toLowerCase().includes(filter.name.toLowerCase())) &&
@@ -135,40 +148,13 @@ export class StarWarsResolver {
               .toLowerCase()
               .includes(filter.language.toLowerCase()))
         );
-      });
-    }
-
-    const response = await firstValueFrom(
-      this.httpService.get<StarWarsApiResponse<Species>>(
-        `${this.baseUrl}/species/?page=${pagination.page}`,
-      ),
+      },
     );
 
-    const results = response.data.results;
-
-    if (!results) {
-      return [];
-    }
-
-    return filter
-      ? results.filter((species) => {
-          return (
-            (!filter.name ||
-              species.name.toLowerCase().includes(filter.name.toLowerCase())) &&
-            (!filter.classification ||
-              species.classification
-                .toLowerCase()
-                .includes(filter.classification.toLowerCase())) &&
-            (!filter.language ||
-              species.language
-                .toLowerCase()
-                .includes(filter.language.toLowerCase()))
-          );
-        })
-      : results;
+    return this.paginateResults(allSpecies, pagination);
   }
 
-  @Query(() => Species, { description: 'Fetch individual species.' })
+  @Query(() => Species)
   async speciesById(
     @Args('id', { type: () => ID }) id: string,
   ): Promise<Species> {
@@ -182,15 +168,14 @@ export class StarWarsResolver {
     return response.data;
   }
 
-  @Query(() => [Vehicle], {
-    description: 'Fetch a list of Star Wars vehicles.',
-  })
+  @Query(() => PaginatedVehicles)
   async vehicles(
     @Args('pagination', { nullable: true }) pagination?: Pagination,
     @Args('filter', { nullable: true }) filter?: VehicleFilter,
-  ): Promise<Vehicle[]> {
-    if (!pagination || !pagination.page) {
-      return this.fetchAllPages<Vehicle>('vehicles', (vehicle) => {
+  ): Promise<PaginatedVehicles> {
+    const allVehicles = await this.fetchAllPages<Vehicle>(
+      'vehicles',
+      (vehicle) => {
         return (
           (!filter?.name ||
             vehicle.name.toLowerCase().includes(filter.name.toLowerCase())) &&
@@ -201,40 +186,13 @@ export class StarWarsResolver {
               .toLowerCase()
               .includes(filter.manufacturer.toLowerCase()))
         );
-      });
-    }
-
-    const response = await firstValueFrom(
-      this.httpService.get<StarWarsApiResponse<Vehicle>>(
-        `${this.baseUrl}/vehicles/?page=${pagination.page}`,
-      ),
+      },
     );
 
-    const results = response.data.results;
-
-    if (!results) {
-      return [];
-    }
-
-    return filter
-      ? results.filter((vehicle) => {
-          return (
-            (!filter.name ||
-              vehicle.name.toLowerCase().includes(filter.name.toLowerCase())) &&
-            (!filter.model ||
-              vehicle.model
-                .toLowerCase()
-                .includes(filter.model.toLowerCase())) &&
-            (!filter.manufacturer ||
-              vehicle.manufacturer
-                .toLowerCase()
-                .includes(filter.manufacturer.toLowerCase()))
-          );
-        })
-      : results;
+    return this.paginateResults(allVehicles, pagination);
   }
 
-  @Query(() => Vehicle, { description: 'Fetch individual vehicle.' })
+  @Query(() => Vehicle)
   async vehicle(@Args('id', { type: () => ID }) id: string): Promise<Vehicle> {
     if (!id) {
       throw new BadRequestException('Vehicle ID must be provided.');
@@ -248,15 +206,14 @@ export class StarWarsResolver {
     return response.data;
   }
 
-  @Query(() => [Starship], {
-    description: 'Fetch a list of Star Wars starships.',
-  })
+  @Query(() => PaginatedStarships)
   async starships(
     @Args('pagination', { nullable: true }) pagination?: Pagination,
     @Args('filter', { nullable: true }) filter?: StarshipFilter,
-  ): Promise<Starship[]> {
-    if (!pagination || !pagination.page) {
-      return this.fetchAllPages<Starship>('starships', (starship) => {
+  ): Promise<PaginatedStarships> {
+    const allStarships = await this.fetchAllPages<Starship>(
+      'starships',
+      (starship) => {
         return (
           (!filter?.name ||
             starship.name.toLowerCase().includes(filter.name.toLowerCase())) &&
@@ -269,42 +226,13 @@ export class StarWarsResolver {
               .toLowerCase()
               .includes(filter.starship_class.toLowerCase()))
         );
-      });
-    }
-
-    const response = await firstValueFrom(
-      this.httpService.get<StarWarsApiResponse<Starship>>(
-        `${this.baseUrl}/starships/?page=${pagination.page}`,
-      ),
+      },
     );
 
-    const results = response.data.results;
-
-    if (!results) {
-      return [];
-    }
-
-    return filter
-      ? results.filter((starship) => {
-          return (
-            (!filter.name ||
-              starship.name
-                .toLowerCase()
-                .includes(filter.name.toLowerCase())) &&
-            (!filter.model ||
-              starship.model
-                .toLowerCase()
-                .includes(filter.model.toLowerCase())) &&
-            (!filter.starship_class ||
-              starship.starship_class
-                .toLowerCase()
-                .includes(filter.starship_class.toLowerCase()))
-          );
-        })
-      : results;
+    return this.paginateResults(allStarships, pagination);
   }
 
-  @Query(() => Starship, { description: 'Fetch individual starship' })
+  @Query(() => Starship)
   async starship(
     @Args('id', { type: () => ID }) id: string,
   ): Promise<Starship> {
@@ -320,57 +248,28 @@ export class StarWarsResolver {
     return response.data;
   }
 
-  @Query(() => [Planet], { description: 'Fetch a list of Star Wars planets.' })
+  @Query(() => PaginatedPlanets)
   async planets(
     @Args('pagination', { nullable: true }) pagination?: Pagination,
     @Args('filter', { nullable: true }) filter?: PlanetFilter,
-  ): Promise<Planet[]> {
-    if (!pagination || !pagination.page) {
-      return this.fetchAllPages<Planet>('planets', (planet) => {
-        return (
-          (!filter?.name ||
-            planet.name.toLowerCase().includes(filter.name.toLowerCase())) &&
-          (!filter?.climate ||
-            planet.climate
-              .toLowerCase()
-              .includes(filter.climate.toLowerCase())) &&
-          (!filter?.terrain ||
-            planet.terrain.toLowerCase().includes(filter.terrain.toLowerCase()))
-        );
-      });
-    }
+  ): Promise<PaginatedPlanets> {
+    const allPlanets = await this.fetchAllPages<Planet>('planets', (planet) => {
+      return (
+        (!filter?.name ||
+          planet.name.toLowerCase().includes(filter.name.toLowerCase())) &&
+        (!filter?.climate ||
+          planet.climate
+            .toLowerCase()
+            .includes(filter.climate.toLowerCase())) &&
+        (!filter?.terrain ||
+          planet.terrain.toLowerCase().includes(filter.terrain.toLowerCase()))
+      );
+    });
 
-    const response = await firstValueFrom(
-      this.httpService.get<StarWarsApiResponse<Planet>>(
-        `${this.baseUrl}/planets/?page=${pagination.page}`,
-      ),
-    );
-
-    const results = response.data.results;
-
-    if (!results) {
-      return [];
-    }
-
-    return filter
-      ? results.filter((planet) => {
-          return (
-            (!filter.name ||
-              planet.name.toLowerCase().includes(filter.name.toLowerCase())) &&
-            (!filter.climate ||
-              planet.climate
-                .toLowerCase()
-                .includes(filter.climate.toLowerCase())) &&
-            (!filter.terrain ||
-              planet.terrain
-                .toLowerCase()
-                .includes(filter.terrain.toLowerCase()))
-          );
-        })
-      : results;
+    return this.paginateResults(allPlanets, pagination);
   }
 
-  @Query(() => Planet, { description: 'Fetch individual planet.' })
+  @Query(() => Planet)
   async planet(@Args('id', { type: () => ID }) id: string): Promise<Planet> {
     if (!id) {
       throw new BadRequestException('Planet ID must be provided.');
@@ -398,19 +297,10 @@ export class StarWarsResolver {
     return allCharacters;
   }
 
-  /**
-   * Analyze the opening crawl of Star Wars films.
-   *
-   * - Counts unique words in the opening crawl texts.
-   * - Identifies the most mentioned characters in the opening crawls.
-   *
-   * @returns An analysis result containing unique word counts and the most mentioned characters.
-   */
-  @Query(() => CrawlAnalysisResult, {
-    description: 'Analyze the opening crawl of Star Wars films.',
-  })
+  @Query(() => CrawlAnalysisResult)
   async analyzeOpeningCrawl(): Promise<CrawlAnalysisResult> {
-    const films = await this.films();
+    const filmsResponse = await this.films(DefaultPagination);
+    const films = filmsResponse.items as Film[];
 
     const characters = await this.getAllCharacters();
 
