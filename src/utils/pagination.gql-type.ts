@@ -47,8 +47,11 @@ export function Paginated<T>(classRef: Type<T>) {
     })
     items: T[];
 
-    @Field(() => PaginationInfo, { description: 'Pagination metadata' })
-    pagination: PaginationInfo;
+    @Field(() => PaginationInfo, {
+      description: 'Pagination metadata',
+      nullable: true,
+    })
+    pagination: PaginationInfo | null;
   }
   return PaginatedType;
 }
