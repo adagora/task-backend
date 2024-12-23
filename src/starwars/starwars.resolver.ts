@@ -47,32 +47,49 @@ class PaginatedPlanets extends Paginated(Planet) {}
 @UseInterceptors(GraphQLCacheInterceptor)
 export class StarWarsResolver {
   private readonly baseUrl = 'https://swapi.py4e.com/api';
+  private readonly maxConcurrentRequests = 5;
   constructor(private readonly httpService: HttpService) {}
 
   private async fetchAllPages<T>(
     endpoint: string,
     filterFn?: (item: T) => boolean,
   ): Promise<T[]> {
+    const initialResponse = await firstValueFrom(
+      this.httpService.get<StarWarsApiResponse<T>>(
+        `${this.baseUrl}/${endpoint}/`,
+      ),
+    );
+
+    const totalCount = initialResponse.data.count;
+    const pageSize = 10;
+    const totalPages = Math.ceil(totalCount / pageSize);
+
+    const pages = Array.from({ length: totalPages }, (_, i) => i + 1);
     let allItems: T[] = [];
-    let nextUrl = `${this.baseUrl}/${endpoint}/`;
 
-    while (nextUrl) {
-      const response = await firstValueFrom(
-        this.httpService.get<StarWarsApiResponse<T>>(nextUrl),
+    for (let i = 0; i < pages.length; i += this.maxConcurrentRequests) {
+      const chunk = pages.slice(i, i + this.maxConcurrentRequests);
+      const pagePromises = chunk.map((pageNum) =>
+        firstValueFrom(
+          this.httpService.get<StarWarsApiResponse<T>>(
+            `${this.baseUrl}/${endpoint}/?page=${pageNum}`,
+          ),
+        ),
       );
-      let pageResults = response.data.results;
 
-      if (filterFn) {
-        pageResults = pageResults.filter(filterFn);
-      }
+      const responses = await Promise.all(pagePromises);
 
-      allItems = [...allItems, ...pageResults];
-      nextUrl = response.data.next as string;
+      responses.forEach((response) => {
+        let pageResults = response.data.results;
+        if (filterFn) {
+          pageResults = pageResults.filter(filterFn);
+        }
+        allItems = [...allItems, ...pageResults];
+      });
     }
 
     return allItems;
   }
-
   private paginateResults<T>(items: T[], pagination?: Pagination) {
     if (!pagination?.page || !pagination?.perPage) {
       return {
@@ -284,63 +301,68 @@ export class StarWarsResolver {
   }
 
   private async getAllCharacters(): Promise<Character[]> {
-    let allCharacters: Character[] = [];
-    let nextUrl = `${this.baseUrl}/people/`;
-
-    while (nextUrl) {
-      const response = await firstValueFrom(
-        this.httpService.get<StarWarsApiResponse<Character>>(nextUrl),
-      );
-      allCharacters = [...allCharacters, ...response.data.results];
-      nextUrl = response.data.next as string;
-    }
-    return allCharacters;
+    return this.fetchAllPages<Character>('people');
   }
 
   @Query(() => CrawlAnalysisResult)
   async analyzeOpeningCrawl(): Promise<CrawlAnalysisResult> {
-    const filmsResponse = await this.films(DefaultPagination);
-    const films = filmsResponse.items as Film[];
+    const [filmsResponse, characters] = await Promise.all([
+      this.films(DefaultPagination),
+      this.getAllCharacters(),
+    ]);
 
-    const characters = await this.getAllCharacters();
+    const films = filmsResponse.items as Film[];
 
     const combinedText = films
       .map((film) => film.opening_crawl)
       .join(' ')
       .toLowerCase();
 
-    const wordCounts = new Map<string, number>();
-    const words = combinedText.match(/\b\w+\b/g) || [];
-    for (const word of words) {
-      wordCounts.set(word, (wordCounts.get(word) || 0) + 1);
-    }
-    const uniqueWordPairs = Array.from(wordCounts.entries()).map(
-      ([word, count]) => ({
-        word,
-        count,
-      }),
-    );
-
-    const characterCounts = new Map<string, number>();
-    for (const character of characters) {
-      const name = character.name.toLowerCase();
-      const regex = new RegExp(`\\b${name}\\b`, 'g');
-      const count = (combinedText.match(regex) || []).length;
-      if (count > 0) {
-        characterCounts.set(character.name, count);
-      }
-    }
-
-    const maxCount = Math.max(...Array.from(characterCounts.values()));
-    const mostMentionedCharacters = Array.from(characterCounts.entries())
-      /* eslint-disable @typescript-eslint/no-unused-vars */
-      .filter(([_, count]) => count === maxCount)
-      .map(([name]) => name);
+    const [uniqueWordPairs, mostMentionedCharacters] = await Promise.all([
+      this.processWordCounts(combinedText),
+      this.processMostMentionedCharacters(combinedText, characters),
+    ]);
 
     return {
       uniqueWordPairs,
       mostMentionedCharacters,
     };
+  }
+
+  private async processWordCounts(text: string) {
+    const wordCounts = new Map<string, number>();
+    const words = text.match(/\b\w+\b/g) || [];
+    for (const word of words) {
+      wordCounts.set(word, (wordCounts.get(word) || 0) + 1);
+    }
+    return Array.from(wordCounts.entries()).map(([word, count]) => ({
+      word,
+      count,
+    }));
+  }
+
+  private async processMostMentionedCharacters(
+    text: string,
+    characters: Character[],
+  ) {
+    const characterCounts = new Map<string, number>();
+    const countPromises = characters.map(async (character) => {
+      const name = character.name.toLowerCase();
+      const regex = new RegExp(`\\b${name}\\b`, 'g');
+      const count = (text.match(regex) || []).length;
+      if (count > 0) {
+        characterCounts.set(character.name, count);
+      }
+    });
+
+    await Promise.all(countPromises);
+    const maxCount = Math.max(...Array.from(characterCounts.values()));
+    return (
+      Array.from(characterCounts.entries())
+        /* eslint-disable @typescript-eslint/no-unused-vars */
+        .filter(([_, count]) => count === maxCount)
+        .map(([name]) => name)
+    );
   }
 
   private handleNotFound(data: unknown, id: string, entity: string): void {
